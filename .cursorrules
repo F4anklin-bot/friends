@@ -1,0 +1,418 @@
+# Party Games App - Cursor Rules
+# Application de jeux de société entre amis
+# Stack: React + PostgreSQL + Socket.io (real-time)
+
+## 🎮 CONTEXTE DU PROJET
+
+Application mobile-first de jeux de société multijoueurs en local (passage de téléphone) avec 3 jeux :
+1. **IMPOSTEUR** (ex-Undercover) - Déduction sociale avec mots secrets
+2. **MIMES** - Faire deviner un mot sans parler
+3. **ACTION OU VÉRITÉ** - Plusieurs modes d'intensité
+
+Palette: Blanc #FFFFFF, Rose #FF69B4, Violet #8B5CF6, Noir #1A1A1A, Jaune #FFD700
+
+---
+
+## 📱 EXIGENCES GÉNÉRALES
+
+- **Mobile-first** - Design responsive, touch-friendly
+- **Performances** - Animations 60fps, transitions fluides
+- **Offline-first** - Fonctionne sans internet (mode local)
+- **Animations** - Framer Motion pour toutes les transitions
+- **Base de données** - PostgreSQL avec Prisma ORM
+- **Real-time** - Socket.io pour synchronisation temps réel
+- **Thème** - Mode sombre/clair avec la palette définie
+
+---
+
+## 🎲 JEU 1: IMPOSTEUR (ex-Undercover)
+
+### Mécaniques de base
+- **Rôles**:
+  - CIVILS (majorité) - Reçoivent le MOT BON identique
+  - IMPOSTEUR (1-2 selon taille) - Reçoit un MOT FAUX similaire mais différent
+  - MR WHITE (optionnel) - Aucun mot, doit bluffer
+
+### Flux de jeu
+1. Création partie → Sélection catégorie → Distribution rôles (téléphone qui tourne)
+2. Phase DESCRIPTION: Chaque joueur donne un indice sur son mot (tour par tour)
+3. Phase DISCUSSION: Section droite CLICABLE - les joueurs débattent (timer configurable)
+4. Phase VOTE: Les joueurs votent pour éliminer un suspect
+5. Résolution: Révélation des rôles et mot
+
+### Protection anti-triche
+- **BLOQUER la saisie du mot** dans le chat/discussion
+- Détection de mots-clés (censure auto si quelqu'un tape son mot)
+- Avertissement visuel si tentative de révélation
+
+### Paramètres de victoire (configurables)
+```typescript
+interface VictoryConditions {
+  // Défauts
+  civilWin: "eliminate_all_impostors" | "survive_rounds"; // défaut: eliminate_all_impostors
+  impostorWin: "civils_eliminated" | "guess_word" | "survive_till_end"; // défaut: guess_word
+  mrWhiteWin: "guess_correct_word" | "survive_final_two"; // défaut: guess_correct_word
+  
+  // Nombres
+  minPlayers: 4;
+  maxPlayers: 20;
+  discussionTime: 180; // secondes, défaut 3min
+  descriptionTime: 30; // secondes par joueur
+  
+  // Variantes
+  allowMrWhite: boolean; // défaut: true
+  multipleImpostors: boolean; // à partir de 7 joueurs
+}
+Base de données - Mots
+sql
+-- Table word_pairs
+CREATE TABLE word_pairs (
+  id UUID PRIMARY KEY,
+  category_id UUID REFERENCES categories,
+  good_word VARCHAR(100) NOT NULL,
+  fake_word VARCHAR(100) NOT NULL,
+  difficulty INT CHECK (difficulty BETWEEN 1 AND 5),
+  language VARCHAR(5) DEFAULT 'fr',
+  usage_count INT DEFAULT 0,
+  is_active BOOLEAN DEFAULT true
+);
+
+-- Table categories
+CREATE TABLE categories (
+  id UUID PRIMARY KEY,
+  name VARCHAR(100) NOT NULL,
+  icon VARCHAR(50),
+  color VARCHAR(7),
+  word_count INT DEFAULT 0,
+  is_premium BOOLEAN DEFAULT false
+);
+Catégories de mots (minimum 50 paires par catégorie)
+🏠 Objets du quotidien
+🐾 Animaux
+🌍 Pays & Villes
+🍕 Nourriture & Boissons
+🎬 Films & Séries
+🎵 Musique & Chanteurs
+🏆 Sports
+💼 Métiers
+🧪 Sciences & Nature
+🎮 Jeux vidéo
+👔 Célébrités
+🎭 Personnages fictifs
+🚗 Transports
+🏛️ Monuments & Lieux
+💊 Santé & Corps humain
+🎭 JEU 2: MIMES (Charades)
+Mécaniques
+Un joueur voit le mot (ne parle PAS)
+Les autres posent des questions oui/non OU devinent directement
+Timer configurable
+Points par mot trouvé
+Paramètres
+typescript
+interface MimesConfig {
+  roundTime: 60; // secondes
+  passAllowed: 3; // nombre de passes autorisées
+  categories: string[];
+  difficulty: "easy" | "medium" | "hard";
+  teamMode: boolean; // mode équipe ou individuel
+}
+Base de données
+sql
+CREATE TABLE mimes_words (
+  id UUID PRIMARY KEY,
+  word VARCHAR(150) NOT NULL,
+  category_id UUID REFERENCES categories,
+  forbidden_words TEXT[], -- mots interdits à ne pas dire
+  difficulty INT,
+  gesture_hints TEXT[], -- indices gestuels suggérés
+  language VARCHAR(5) DEFAULT 'fr'
+);
+🔥 JEU 3: ACTION OU VÉRITÉ
+Modes d'intensité (sélectionnable en début de partie)
+Mode	Description	Couleur
+FUN	Questions/amusantes, actions bêtes	🟢 Vert
+FRIENDLY	Entre amis, rien de méchant	🔵 Bleu
+CLASSIC	Standard, équilibré	⚪ Blanc
+SPICY	Légèrement osé, suggestions	🟡 Jaune
+HOT	Plus hot, questions intimes	🟠 Orange
+HARDCORE	Sans filtre, très poussé	🔴 Rouge
+SEXUAL	Contenu adulte explicite	🟣 Violet
+VERY HOT	Extrême, limites repoussées	⚫ Noir
+Structure des questions
+typescript
+interface TruthOrDareCard {
+  id: UUID;
+  mode: "fun" | "friendly" | "classic" | "spicy" | "hot" | "hardcore" | "sexual" | "very_hot";
+  type: "truth" | "dare" | "both";
+  content: string;
+  intensity: 1-10;
+  playerCount: "solo" | "couple" | "group";
+  tags: string[]; // ["alcool", "intime", "physique", "mental", etc.]
+  genderSpecific?: "male" | "female" | "any";
+  followUp?: UUID; // carte suivante enchaînée
+}
+Features spéciales
+Roue de la fortune - Sélection aléatoire joueur + mode
+Niveau de gage - Échelle visuelle 1-10 avant de révéler
+Pass - Limité par partie (3 max)
+Double tour - Action/vérité pour 2 joueurs
+Mode équipe - vs équipe adverse
+Base de données (minimum 500 cartes par mode)
+sql
+CREATE TABLE truth_or_dare_cards (
+  id UUID PRIMARY KEY,
+  mode VARCHAR(20) NOT NULL CHECK (mode IN ('fun', 'friendly', 'classic', 'spicy', 'hot', 'hardcore', 'sexual', 'very_hot')),
+  type VARCHAR(10) NOT NULL CHECK (type IN ('truth', 'dare', 'both')),
+  content TEXT NOT NULL,
+  intensity INT CHECK (intensity BETWEEN 1 AND 10),
+  player_count VARCHAR(10) DEFAULT 'solo',
+  tags TEXT[],
+  language VARCHAR(5) DEFAULT 'fr',
+  usage_stats JSONB DEFAULT '{"shown": 0, "skipped": 0, "completed": 0}',
+  is_active BOOLEAN DEFAULT true,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Index pour performance
+CREATE INDEX idx_tod_mode_intensity ON truth_or_dare_cards(mode, intensity);
+CREATE INDEX idx_tod_type ON truth_or_dare_cards(type);
+🎨 DESIGN SYSTEM
+Couleurs
+css
+:root {
+  --white: #FFFFFF;
+  --rose: #FF69B4;
+  --rose-light: #FFB6C1;
+  --violet: #8B5CF6;
+  --violet-dark: #6D28D9;
+  --black: #1A1A1A;
+  --black-light: #2D2D2D;
+  --yellow: #FFD700;
+  --yellow-soft: #FFE55C;
+  
+  /* Gradients */
+  --gradient-primary: linear-gradient(135deg, #FF69B4 0%, #8B5CF6 100%);
+  --gradient-dark: linear-gradient(180deg, #1A1A1A 0%, #2D2D2D 100%);
+  --gradient-gold: linear-gradient(135deg, #FFD700 0%, #FFA500 100%);
+}
+Typographie
+Titres: Poppins Bold / Inter Bold
+Corps: Inter Regular / SF Pro Text (iOS)
+Accent: Playfair Display (pour titres stylisés)
+Composants UI
+Boutons: Border-radius 16px, shadow doux, hover scale 1.02
+Cartes: Glassmorphism (backdrop-blur), border 1px rgba(255,255,255,0.1)
+Inputs: Bottom-border only, animation focus violet→rose
+Animations:
+Page transition: slide + fade 300ms
+Cartes: flip 3D pour révélation mots
+Pulse sur éléments interactifs
+Confetti sur victoire
+Animations requises (Framer Motion)
+typescript
+// Page transition
+const pageTransition = {
+  initial: { opacity: 0, x: 20 },
+  animate: { opacity: 1, x: 0 },
+  exit: { opacity: 0, x: -20 },
+  transition: { duration: 0.3, ease: "easeOut" }
+};
+
+// Card flip (pour révélation rôles)
+const cardFlip = {
+  rotateY: [0, 90, 90, 0],
+  transition: { duration: 0.6 }
+};
+
+// Pulse interaction
+const pulse = {
+  scale: [1, 1.05, 1],
+  transition: { repeat: Infinity, duration: 2 }
+};
+🏗️ ARCHITECTURE TECHNIQUE
+Structure des dossiers
+src/
+├── components/
+│   ├── common/          # Button, Card, Input, Modal
+│   ├── game/           # Composants spécifiques jeux
+│   ├── animations/     # Framer Motion wrappers
+│   └── layout/         # Header, Navigation, Container
+├── screens/
+│   ├── Home/
+│   ├── ImpostorGame/
+│   ├── MimesGame/
+│   └── TruthOrDareGame/
+├── hooks/
+│   ├── useGameState/
+│   ├── useLocalStorage/
+│   └── useSocket/
+├── context/
+│   ├── GameContext/
+│   └── ThemeContext/
+├── services/
+│   ├── api/            # Calls API
+│   ├── db/             # PostgreSQL queries
+│   └── socket/         # Socket.io handlers
+├── utils/
+│   ├── validators/     # Anti-triche, détection mots
+│   ├── constants/      # Configs jeux
+│   └── helpers/        # Fonctions utilitaires
+└── types/              # TypeScript interfaces
+Stack technique obligatoire
+Frontend: React 18+ + TypeScript + Vite
+State: Zustand (global) + React Query (server)
+Styling: TailwindCSS + CSS Modules
+Animations: Framer Motion
+Backend: Node.js + Express + Socket.io
+Database: PostgreSQL + Prisma ORM
+Storage: localStorage (offline) + sync PostgreSQL
+Icons: Lucide React + Custom SVG
+Performance requirements
+First Contentful Paint < 1.5s
+Time to Interactive < 3s
+Animations jank-free (60fps)
+Bundle size < 200KB initial
+🛡️ RÈGLES ANTI-TRICHE (IMPOSTEUR)
+Détection automatique
+typescript
+// Dans le service de chat/discussion
+const forbiddenWordDetection = (message: string, secretWord: string): boolean => {
+  const normalized = message.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const wordNormalized = secretWord.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  
+  // Détection exacte + variations + mots proches (Levenshtein distance < 2)
+  return normalized.includes(wordNormalized) || 
+         calculateLevenshtein(normalized, wordNormalized) <= 2;
+};
+
+// Action si détection
+const handleCheatingAttempt = (playerId: string) => {
+  // Avertissement visuel rouge
+  // Masquage du message
+  // Compteur de warnings (3 = élimination auto)
+};
+Protection interface
+Input de discussion avec filtre temps réel
+Message "⚠️ Tu ne peux pas révéler ton mot !" si tentative
+Censure visuelle (astérisques) si mot détecté
+📊 MODÈLES DE DONNÉES (Prisma)
+prisma
+// schema.prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model GameSession {
+  id          String   @id @default(uuid())
+  gameType    GameType
+  code        String   @unique @db.VarChar(6) // Code partie 6 caractères
+  status      Status   @default(WAITING)
+  config      Json
+  players     Player[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Player {
+  id            String      @id @default(uuid())
+  name          String
+  sessionId     String
+  session       GameSession @relation(fields: [sessionId], references: [id])
+  role          Role?
+  secretWord    String?
+  isEliminated  Boolean     @default(false)
+  score         Int         @default(0)
+  deviceId      String      @unique // Pour éviter doubles comptes
+}
+
+enum GameType {
+  IMPOSTOR
+  MIMES
+  TRUTH_OR_DARE
+}
+
+enum Status {
+  WAITING
+  IN_PROGRESS
+  FINISHED
+}
+
+enum Role {
+  CIVIL
+  IMPOSTOR
+  MR_WHITE
+}
+✅ CHECKLIST DE DÉVELOPPEMENT
+Phase 1: Fondation
+ Setup React + Vite + TypeScript + Tailwind
+ Configuration PostgreSQL + Prisma
+ Design system (colors, typography, components)
+ Navigation mobile-first
+Phase 2: Jeu Imposteur
+ CRUD catégories/mots (1500+ paires)
+ Distribution rôles avec animations flip
+ Phase description (tour par tour)
+ Section discussion avec protection anti-triche
+ Système de vote
+ Conditions de victoire configurables
+Phase 3: Jeu Mimes
+ Base de données mots (500+)
+ Timer animé
+ Système de scores
+ Mode équipe
+Phase 4: Action ou Vérité
+ Base de données 500+ cartes/mode
+ Roue de la fortune animée
+ 8 modes de difficulté
+ Système de pass/follow-up
+Phase 5: Polish
+ Animations Framer Motion partout
+ Mode offline (localStorage sync)
+ Sons et vibrations haptiques
+ Tests performance
+ Optimisation bundle
+🚫 INTERDICTIONS & CONTRAINTES
+NE PAS utiliser de frameworks lourds (pas Angular, pas Vue)
+NE PAS stocker les mots en clair côté client (toujours vérifier serveur)
+NE PAS permettre la révélation de mots dans le chat (filtrage obligatoire)
+NE PAS ignorer le mobile-first (tout doit être touch-friendly)
+NE PAS oublier les animations (expérience clé du produit)
+NE PAS hardcoder les couleurs (utiliser le theme provider)
+🔧 COMMANDES UTILES
+bash
+# Setup initial
+npm create vite@latest party-games -- --template react-ts
+cd party-games && npm install
+
+# Dépendances
+npm install framer-motion zustand @tanstack/react-query socket.io-client lucide-react
+npm install -D tailwindcss postcss autoprefixer prisma @types/node
+
+# Prisma
+npx prisma init
+npx prisma migrate dev --name init
+npx prisma generate
+npx prisma studio # GUI admin
+📱 RÉFÉRENCES UI/UX À ÉTUDIER
+Analysez ces apps pour inspiration:
+
+Undercover (Yanstar Studio) - UX passage téléphone
+Spyfall - Interface rôle/déduction
+Picolo - Design cartes Action/Vérité
+Bluffin - Animations et fluidité
+Cluso - Multi-jeux dans une app
+🎯 CRITÈRES DE SUCCÈS
+L'app est réussie si:
+
+ Temps de création partie < 30 secondes
+ Aucun bug de révélation mot involontaire
+ Animations fluides sur tous les appareils
+ Mode offline 100% fonctionnel
+ 1500+ mots Imposteur, 500+ Mimes, 4000+ Action/Vérité
+ Rating App Store > 4.5 étoiles

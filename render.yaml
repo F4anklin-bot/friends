@@ -1,0 +1,16 @@
+# Render Blueprint — free web service for Socket.io
+# Connect the GitHub repo in https://dashboard.render.com → New → Blueprint
+services:
+  - type: web
+    name: friends-api
+    runtime: node
+    rootDir: server
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: FRONTEND_ORIGIN
+        sync: false
