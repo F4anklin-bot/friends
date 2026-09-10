@@ -42,3 +42,4 @@ coverage/
 # Local tooling
 *.local
 .turbo/
+.neon

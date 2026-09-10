@@ -59,7 +59,10 @@ function card(
   forGender: TodCard['forGender'] = 'any',
   withGender: TodCard['withGender'] = 'any',
   playerCount?: TodCard['playerCount'],
+  extras?: { duration?: number; intimate?: boolean },
 ): TodCard {
+  const count = playerCount ?? (party === 'couples' || content.includes('{other}') ? 'couple' : 'solo')
+  const intimateLevels = level === 'hot' || level === 'hard' || level === 'extreme' || level === 'spice'
   return {
     id,
     level,
@@ -69,7 +72,9 @@ function card(
     intensity,
     forGender,
     withGender,
-    playerCount: playerCount ?? (party === 'couples' || content.includes('{other}') ? 'couple' : 'solo'),
+    playerCount: count,
+    duration: extras?.duration,
+    intimate: extras?.intimate ?? (intimateLevels && type === 'dare' && count === 'couple'),
     adult: level === 'hard' || level === 'extreme' || level === 'spice',
   }
 }
@@ -236,10 +241,30 @@ export const TOD_CARDS: TodCard[] = [
   card('pc10', 'spice', 'couples', 'truth', 'Quel “piment” vous pourriez ajouter ce soir sans vous forcer ?', 9),
   card('pc11', 'spice', 'couples', 'dare', 'Massage très bas du dos de {other}, 30 secondes, silence.', 9),
   card('pc12', 'spice', 'couples', 'truth', 'Si on vous laisse la pièce 10 minutes, vous faites quoi — cash.', 10),
+
+  // Timed challenges (mix levels)
+  card('tm1', 'soft', 'friends', 'dare', 'Fais 15 squats en {duration} secondes.', 2, 'any', 'any', 'solo', { duration: 30 }),
+  card('tm2', 'soft', 'friends', 'dare', 'Tiens en équilibre sur une jambe pendant {duration} secondes.', 2, 'any', 'any', 'solo', { duration: 20 }),
+  card('tm3', 'fun', 'friends', 'dare', 'Danse sans musique pendant {duration} secondes. Le groupe note.', 3, 'any', 'any', 'solo', { duration: 15 }),
+  card('tm4', 'fun', 'friends', 'dare', 'Fais 20 pompes (ou genoux) en {duration} secondes.', 3, 'male', 'any', 'solo', { duration: 40 }),
+  card('tm5', 'fun', 'couples', 'dare', 'Regarde {other} dans les yeux pendant {duration} secondes sans rire.', 3, 'any', 'any', 'couple', { duration: 10 }),
+  card('tm6', 'hot', 'friends', 'dare', 'Complimente {other} sans pause pendant {duration} secondes.', 5, 'any', 'any', 'couple', { duration: 20 }),
+  card('tm7', 'hot', 'couples', 'dare', 'Massage du cou de {other} pendant {duration} secondes.', 6, 'any', 'any', 'couple', { duration: 30, intimate: true }),
+  card('tm8', 'hot', 'couples', 'dare', 'Tiens la main de {other} pendant {duration} secondes, silence.', 5, 'any', 'any', 'couple', { duration: 25, intimate: true }),
+  card('tm9', 'hard', 'couples', 'dare', 'Embrasse la joue de {other} et maintiens {duration} secondes.', 8, 'any', 'any', 'couple', { duration: 5, intimate: true }),
+  card('tm10', 'hard', 'couples', 'dare', 'Câlin collé à {other} pendant {duration} secondes.', 8, 'any', 'any', 'couple', { duration: 15, intimate: true }),
+  card('tm11', 'extreme', 'couples', 'dare', 'Slow collé avec {other} pendant {duration} secondes.', 9, 'any', 'any', 'couple', { duration: 20, intimate: true }),
+  card('tm12', 'spice', 'couples', 'dare', 'Guide les mains de {other} pendant {duration} secondes. Veto ok.', 10, 'any', 'any', 'couple', { duration: 20, intimate: true }),
+  card('tm13', 'fun', 'friends', 'truth', 'Réponds sans détour en moins de {duration} secondes : ton crush secret ici ?', 4, 'any', 'any', 'group', { duration: 15 }),
+  card('tm14', 'soft', 'friends', 'dare', 'Imite un animal choisi par le groupe pendant {duration} secondes.', 2, 'any', 'any', 'solo', { duration: 12 }),
 ]
 
-export function fillTemplate(content: string, name: string, other?: string) {
-  return content.replaceAll('{name}', name).replaceAll('{other}', other ?? 'quelqu’un')
+export function fillTemplate(content: string, name: string, other?: string, duration?: number) {
+  return content
+    .replaceAll('{name}', name)
+    .replaceAll('{other}', other ?? 'quelqu’un')
+    .replaceAll('{target}', other ?? 'quelqu’un')
+    .replaceAll('{duration}', duration != null ? String(duration) : '30')
 }
 
 export function cardsFor(level: TodLevel, party: TodParty) {

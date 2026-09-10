@@ -74,3 +74,15 @@ body {
 .perspective-card {
   perspective: 1200px;
 }
+
+.wheel-gpu {
+  transform: translateZ(0);
+  will-change: transform;
+  contain: layout style paint;
+  transform-origin: center center;
+  backface-visibility: hidden;
+}
+
+.wheel-spinning {
+  pointer-events: none;
+}

@@ -116,5 +116,9 @@ export interface TodCard {
   forGender: Gender | 'any'
   withGender: Gender | 'any'
   playerCount: 'solo' | 'couple' | 'group'
+  /** Secondes chronométrées (0 = pas de timer) */
+  duration?: number
+  /** Contact physique intime → filtre male→male */
+  intimate?: boolean
   adult?: boolean
 }

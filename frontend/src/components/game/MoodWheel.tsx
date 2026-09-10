@@ -1,163 +1,154 @@
-import { useMemo, useState } from 'react'
-import { motion } from 'framer-motion'
+import { useEffect, useRef, useState } from 'react'
 import type { Player, TodLevel } from '../../types/game'
 import { haptic } from '../../utils/helpers'
+import { emptyWheelMemory, pickWeightedIndex, rememberPick, type WheelMemory } from '../../utils/wheelPick'
 
-/** Look & feel of the wheel — changes with difficulty (more erotic as it climbs). */
 export const WHEEL_MOOD: Record<
   TodLevel,
-  {
-    ring: string
-    hub: string
-    pointer: string
-    idle: 'bob' | 'wiggle' | 'heartbeat' | 'pulse' | 'glow' | 'breathe' | 'sketch'
-    particles: string[]
-    spinMs: number
-    caption: string
-  }
+  { colors: [string, string]; hub: string; pointer: string; particles: string[]; caption: string; friction: number }
 > = {
-  soft: {
-    ring: 'from-sky-200 to-sky-400',
-    hub: 'bg-sky-300 text-ink',
-    pointer: 'border-t-sky-400',
-    idle: 'bob',
-    particles: ['✨', '☁️', '💫'],
-    spinMs: 3200,
-    caption: 'Douce petite roue…',
-  },
-  fun: {
-    ring: 'from-amber-200 to-yellow-400',
-    hub: 'bg-gold text-ink',
-    pointer: 'border-t-gold',
-    idle: 'wiggle',
-    particles: ['🎉', '🍭', '😄'],
-    spinMs: 2800,
-    caption: 'Ça va tourner fort',
-  },
-  hot: {
-    ring: 'from-rose-300 to-rose-500',
-    hub: 'bg-rose text-white',
-    pointer: 'border-t-rose',
-    idle: 'heartbeat',
-    particles: ['💕', '🔥', '😘'],
-    spinMs: 3400,
-    caption: 'Le cœur s’emballe…',
-  },
-  hard: {
-    ring: 'from-violet-400 to-violet-700',
-    hub: 'bg-violet text-white',
-    pointer: 'border-t-violet',
-    idle: 'pulse',
-    particles: ['😈', '💜', '🌙'],
-    spinMs: 3600,
-    caption: 'Plus lent… plus osé',
-  },
-  extreme: {
-    ring: 'from-zinc-700 to-black',
-    hub: 'bg-ink text-white',
-    pointer: 'border-t-ink dark:border-t-white',
-    idle: 'glow',
-    particles: ['🖤', '⚡', '🩸'],
-    spinMs: 3800,
-    caption: 'Sans filet',
-  },
-  spice: {
-    ring: 'from-rose-700 to-red-950',
-    hub: 'bg-rose-700 text-white',
-    pointer: 'border-t-rose-700',
-    idle: 'breathe',
-    particles: ['🌶️', '💋', '🔥'],
-    spinMs: 4000,
-    caption: 'Pour pimenter…',
-  },
-  custom: {
-    ring: 'from-white to-rose-100',
-    hub: 'bg-white text-ink',
-    pointer: 'border-t-rose',
-    idle: 'sketch',
-    particles: ['✍️', '⭐', '💭'],
-    spinMs: 3000,
-    caption: 'Vos règles, votre roue',
-  },
-}
-
-function pieSlice(index: number, total: number) {
-  const start = (index / total) * Math.PI * 2 - Math.PI / 2
-  const end = ((index + 1) / total) * Math.PI * 2 - Math.PI / 2
-  const x1 = 100 + 98 * Math.cos(start)
-  const y1 = 100 + 98 * Math.sin(start)
-  const x2 = 100 + 98 * Math.cos(end)
-  const y2 = 100 + 98 * Math.sin(end)
-  const large = end - start > Math.PI ? 1 : 0
-  return `M 100 100 L ${x1} ${y1} A 98 98 0 ${large} 1 ${x2} ${y2} Z`
-}
-
-function idleAnim(kind: (typeof WHEEL_MOOD)[TodLevel]['idle']) {
-  switch (kind) {
-    case 'bob':
-      return { y: [0, -6, 0], transition: { repeat: Infinity, duration: 2.4, ease: 'easeInOut' as const } }
-    case 'wiggle':
-      return { rotate: [0, -2.5, 2.5, 0], transition: { repeat: Infinity, duration: 1.8, ease: 'easeInOut' as const } }
-    case 'heartbeat':
-      return { scale: [1, 1.04, 1, 1.06, 1], transition: { repeat: Infinity, duration: 1.35, ease: 'easeInOut' as const } }
-    case 'pulse':
-      return { scale: [1, 1.03, 1], transition: { repeat: Infinity, duration: 2.2, ease: 'easeInOut' as const } }
-    case 'glow':
-      return { scale: [1, 1.02, 1], opacity: [1, 0.92, 1], transition: { repeat: Infinity, duration: 2.6 } }
-    case 'breathe':
-      return {
-        scale: [1, 1.05, 1],
-        rotate: [0, 1.2, -1.2, 0],
-        transition: { repeat: Infinity, duration: 3.2, ease: 'easeInOut' as const },
-      }
-    case 'sketch':
-      return { rotate: [0, 1, -1, 0], transition: { repeat: Infinity, duration: 3 } }
-  }
+  soft: { colors: ['#7dd3fc', '#38bdf8'], hub: 'bg-sky-300 text-ink', pointer: 'border-t-sky-400', particles: ['✨', '☁️'], caption: 'Douce petite roue…', friction: 0.988 },
+  fun: { colors: ['#fde047', '#fbbf24'], hub: 'bg-gold text-ink', pointer: 'border-t-gold', particles: ['🎉', '🍭'], caption: 'Ça va tourner fort', friction: 0.985 },
+  hot: { colors: ['#fb7185', '#f43f5e'], hub: 'bg-rose text-white', pointer: 'border-t-rose', particles: ['💕', '🔥'], caption: 'Le cœur s’emballe…', friction: 0.987 },
+  hard: { colors: ['#a78bfa', '#7c3aed'], hub: 'bg-violet text-white', pointer: 'border-t-violet', particles: ['😈', '💜'], caption: 'Plus lent… plus osé', friction: 0.989 },
+  extreme: { colors: ['#3f3f46', '#09090b'], hub: 'bg-ink text-white', pointer: 'border-t-ink dark:border-t-white', particles: ['🖤', '⚡'], caption: 'Sans filet', friction: 0.99 },
+  spice: { colors: ['#be123c', '#450a0a'], hub: 'bg-rose-700 text-white', pointer: 'border-t-rose-700', particles: ['🌶️', '💋'], caption: 'Pour pimenter…', friction: 0.991 },
+  custom: { colors: ['#ffe4e6', '#fda4af'], hub: 'bg-white text-ink', pointer: 'border-t-rose', particles: ['✍️', '⭐'], caption: 'Vos règles, votre roue', friction: 0.986 },
 }
 
 interface MoodWheelProps {
   players: Player[]
   level: TodLevel
   turn: number
-  onLand: (index: number) => void
+  memory: WheelMemory
+  onLand: (index: number, nextMemory: WheelMemory) => void
 }
 
-export function MoodWheel({ players, level, turn, onLand }: MoodWheelProps) {
+export function MoodWheel({ players, level, turn, memory, onLand }: MoodWheelProps) {
   const mood = WHEEL_MOOD[level] ?? WHEEL_MOOD.fun
-  const [rotation, setRotation] = useState(0)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const wheelRef = useRef<HTMLDivElement>(null)
+  const rotationRef = useRef(0)
+  const velocityRef = useRef(0)
+  const rafRef = useRef(0)
+  const targetIndexRef = useRef(0)
+  const memoryRef = useRef(memory)
   const [spinning, setSpinning] = useState(false)
   const [burst, setBurst] = useState(false)
-  const slice = 360 / Math.max(players.length, 1)
 
-  const sparkles = useMemo(
-    () =>
-      Array.from({ length: 8 }, (_, i) => ({
-        id: i,
-        emoji: mood.particles[i % mood.particles.length] ?? '✨',
-        angle: (i / 8) * 360,
-        delay: i * 0.12,
-      })),
-    [mood.particles],
-  )
+  memoryRef.current = memory
+
+  const draw = (highlightLabels: boolean) => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    const size = canvas.width
+    const cx = size / 2
+    const cy = size / 2
+    const radius = size / 2 - 8
+    const n = Math.max(players.length, 1)
+    const slice = (Math.PI * 2) / n
+
+    ctx.clearRect(0, 0, size, size)
+    players.forEach((player, i) => {
+      const start = i * slice - Math.PI / 2
+      const end = start + slice
+      ctx.beginPath()
+      ctx.moveTo(cx, cy)
+      ctx.arc(cx, cy, radius, start, end)
+      ctx.closePath()
+      ctx.fillStyle = player.color || (i % 2 === 0 ? mood.colors[0] : mood.colors[1])
+      ctx.fill()
+      ctx.strokeStyle = 'rgba(255,255,255,0.35)'
+      ctx.lineWidth = 2
+      ctx.stroke()
+
+      if (highlightLabels) {
+        const mid = start + slice / 2
+        const tx = cx + Math.cos(mid) * radius * 0.62
+        const ty = cy + Math.sin(mid) * radius * 0.62
+        ctx.save()
+        ctx.translate(tx, ty)
+        ctx.rotate(mid + Math.PI / 2)
+        ctx.fillStyle = '#fff'
+        ctx.font = 'bold 15px Poppins, sans-serif'
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(player.name.slice(0, 8), 0, 0)
+        ctx.restore()
+      }
+    })
+
+    ctx.beginPath()
+    ctx.arc(cx, cy, 36, 0, Math.PI * 2)
+    ctx.fillStyle = 'rgba(255,255,255,0.14)'
+    ctx.fill()
+  }
+
+  useEffect(() => {
+    draw(!spinning)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [players, level, spinning])
+
+  useEffect(() => {
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current)
+    }
+  }, [])
+
+  const applyTransform = () => {
+    if (wheelRef.current) {
+      wheelRef.current.style.transform = `rotate(${rotationRef.current}deg)`
+    }
+  }
+
+  const finish = () => {
+    setBurst(true)
+    haptic([18, 30, 18])
+    setSpinning(false)
+    draw(true)
+    const player = players[targetIndexRef.current]
+    const next = player ? rememberPick(memoryRef.current, player.id) : emptyWheelMemory()
+    window.setTimeout(() => onLand(targetIndexRef.current, next), 420)
+  }
+
+  const animate = () => {
+    velocityRef.current *= mood.friction
+    rotationRef.current += velocityRef.current
+    applyTransform()
+
+    if (velocityRef.current > 0.35) {
+      rafRef.current = requestAnimationFrame(animate)
+      return
+    }
+
+    // Snap toward the intended winner slice center under the top pointer
+    const n = Math.max(players.length, 1)
+    const slice = 360 / n
+    const targetRot = 360 - targetIndexRef.current * slice - slice / 2
+    let current = ((rotationRef.current % 360) + 360) % 360
+    let delta = targetRot - current
+    if (delta > 180) delta -= 360
+    if (delta < -180) delta += 360
+    rotationRef.current += delta
+    applyTransform()
+    finish()
+  }
 
   const spin = () => {
     if (spinning || players.length === 0) return
     haptic([10, 40, 10, 20, 8])
-    setSpinning(true)
     setBurst(false)
-    const index = Math.floor(Math.random() * players.length)
-    const extra = 360 * (level === 'spice' || level === 'extreme' ? 6 : 5)
-    setRotation((value) => {
-      const normalized = ((value % 360) + 360) % 360
-      const landing = 360 - index * slice - slice / 2
-      return value + extra + (landing - normalized)
-    })
-    window.setTimeout(() => {
-      setBurst(true)
-      haptic([18, 30, 18])
-      setSpinning(false)
-      window.setTimeout(() => onLand(index), 520)
-    }, mood.spinMs)
+    setSpinning(true)
+    draw(false)
+
+    const index = pickWeightedIndex(players, memoryRef.current)
+    targetIndexRef.current = index
+
+    // Physics kick — enough energy to spin several turns
+    velocityRef.current = 18 + Math.random() * 10
+    rafRef.current = requestAnimationFrame(animate)
   }
 
   return (
@@ -168,100 +159,47 @@ export function MoodWheel({ players, level, turn, onLand }: MoodWheelProps) {
       <p className="mt-2 font-heading text-lg font-bold text-ink/70 dark:text-white/70">{mood.caption}</p>
 
       <div className="relative mt-6 h-72 w-72">
-        {/* Floating particles */}
-        {sparkles.map((item) => (
-          <motion.span
-            key={`${level}-${item.id}`}
-            className="pointer-events-none absolute left-1/2 top-1/2 text-xl"
-            style={{ originX: 0.5, originY: 0.5 }}
-            animate={{
-              x: Math.cos((item.angle * Math.PI) / 180) * (spinning ? 128 : 118),
-              y: Math.sin((item.angle * Math.PI) / 180) * (spinning ? 128 : 118),
-              opacity: spinning ? [0.4, 1, 0.4] : [0.55, 1, 0.55],
-              scale: spinning ? [0.9, 1.25, 0.9] : [0.95, 1.1, 0.95],
-            }}
-            transition={{ repeat: Infinity, duration: 2.4 + item.delay, delay: item.delay }}
-          >
-            {item.emoji}
-          </motion.span>
-        ))}
-
-        {/* Pointer */}
-        <motion.div
-          className={`absolute left-1/2 top-0 z-20 h-0 w-0 -translate-x-1/2 border-x-[10px] border-t-[20px] border-x-transparent ${mood.pointer}`}
-          animate={spinning ? { y: [0, -4, 0] } : { y: [0, -2, 0] }}
-          transition={{ repeat: Infinity, duration: 0.45 }}
-        />
-
-        {/* Soft aura */}
-        <motion.div
-          className={`absolute inset-3 rounded-full bg-gradient-to-br ${mood.ring} opacity-30 blur-2xl`}
-          animate={idleAnim(mood.idle)}
-        />
-
-        <motion.div
-          className="relative h-full w-full"
-          animate={spinning ? undefined : idleAnim(mood.idle)}
-        >
-          <motion.div
-            className={`h-full w-full overflow-hidden rounded-full border-[6px] border-white/30 shadow-[0_20px_50px_rgba(0,0,0,0.25)] bg-gradient-to-br ${mood.ring}`}
-            animate={{ rotate: rotation }}
-            transition={{
-              duration: mood.spinMs / 1000,
-              ease: [0.12, 0.8, 0.08, 1],
-            }}
-          >
-            <svg viewBox="0 0 200 200" className="h-full w-full">
-              {players.map((player, index) => (
-                <path
-                  key={player.id}
-                  d={pieSlice(index, players.length)}
-                  fill={player.color}
-                  opacity={0.92}
-                  stroke="rgba(255,255,255,0.35)"
-                  strokeWidth="1"
-                />
-              ))}
-              {/* Decorative inner ring */}
-              <circle cx="100" cy="100" r="34" fill="rgba(255,255,255,0.12)" />
-              {level === 'spice' || level === 'hot' || level === 'hard' ? (
-                <text x="100" y="106" textAnchor="middle" fontSize="22">
-                  {level === 'spice' ? '💋' : level === 'hot' ? '❤️' : '😈'}
-                </text>
-              ) : null}
-            </svg>
-            {players.map((player, index) => (
+        {!spinning
+          ? mood.particles.map((emoji, i) => (
               <span
-                key={`${player.id}-label`}
-                className="absolute left-1/2 top-1/2 origin-top text-[11px] font-bold text-white drop-shadow"
-                style={{ transform: `rotate(${index * slice + slice / 2}deg) translateY(-112px)` }}
+                key={`${emoji}-${i}`}
+                className="pointer-events-none absolute left-1/2 top-1/2 text-xl opacity-70"
+                style={{
+                  transform: `rotate(${i * (360 / mood.particles.length)}deg) translateY(-118px)`,
+                }}
               >
-                {player.name.slice(0, 8)}
+                {emoji}
               </span>
-            ))}
-          </motion.div>
+            ))
+          : null}
 
-          {/* Hub button */}
-          <button
-            type="button"
-            disabled={spinning}
-            onClick={spin}
-            className={`absolute left-1/2 top-1/2 z-10 flex h-20 w-20 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full font-heading text-sm font-extrabold shadow-lg ${mood.hub} disabled:opacity-80`}
-          >
-            {spinning ? '…' : 'Tourne'}
-          </button>
-        </motion.div>
+        <div className={`absolute left-1/2 top-0 z-20 h-0 w-0 -translate-x-1/2 border-x-[10px] border-t-[20px] border-x-transparent ${mood.pointer}`} />
 
-        {/* Landing burst */}
+        <div
+          ref={wheelRef}
+          className={`wheel-gpu relative h-full w-full ${spinning ? 'wheel-spinning' : ''}`}
+        >
+          <canvas
+            ref={canvasRef}
+            width={320}
+            height={320}
+            className="h-full w-full rounded-full border-[6px] border-white/25 shadow-[0_20px_50px_rgba(0,0,0,0.25)]"
+          />
+        </div>
+
+        <button
+          type="button"
+          disabled={spinning}
+          onClick={spin}
+          className={`absolute left-1/2 top-1/2 z-10 flex h-20 w-20 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full font-heading text-sm font-extrabold shadow-lg ${mood.hub} disabled:opacity-80`}
+        >
+          {spinning ? '…' : 'Tourne'}
+        </button>
+
         {burst ? (
-          <motion.div
-            className="pointer-events-none absolute inset-0 flex items-center justify-center text-4xl"
-            initial={{ scale: 0.4, opacity: 0 }}
-            animate={{ scale: [0.6, 1.4, 1], opacity: [0, 1, 0] }}
-            transition={{ duration: 0.7 }}
-          >
+          <div className="pointer-events-none absolute inset-0 flex animate-ping items-center justify-center text-4xl opacity-70">
             {mood.particles[0]}
-          </motion.div>
+          </div>
         ) : null}
       </div>
     </div>

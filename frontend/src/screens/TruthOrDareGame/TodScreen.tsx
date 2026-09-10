@@ -1,12 +1,20 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AnimatePresence, motion, type PanInfo } from 'framer-motion'
-import { Check, ChevronLeft, ChevronRight, Plus, X } from 'lucide-react'
+import { Check, ChevronLeft, ChevronRight, Plus, Volume2, VolumeX, X } from 'lucide-react'
 import { Button } from '../../components/common/Button'
 import { Modal } from '../../components/common/Modal'
 import { Screen } from '../../components/layout/Screen'
+import { ChallengeTimer } from '../../components/game/ChallengeTimer'
 import { MoodWheel } from '../../components/game/MoodWheel'
 import { PlayerSetup } from '../../components/game/PlayerSetup'
 import { TOD_LEVELS, TOD_PARTIES } from '../../data/todCards'
+import {
+  ttsAnnounceTurn,
+  ttsAskChoice,
+  ttsReadChallenge,
+  ttsStop,
+  ttsSupported,
+} from '../../services/tts'
 import { useAppStore } from '../../store/appStore'
 import { useTodStore } from '../../store/todStore'
 import type { Gender, TodLevel, TodType } from '../../types/game'
@@ -351,7 +359,9 @@ function WheelPhase() {
   const players = useTodStore((state) => state.players)
   const level = useTodStore((state) => state.level)
   const turn = useTodStore((state) => state.turn)
+  const wheelMemory = useTodStore((state) => state.wheelMemory)
   const landOn = useTodStore((state) => state.landOn)
+  const ttsEnabled = useTodStore((state) => state.ttsEnabled)
 
   return (
     <motion.div
@@ -360,7 +370,21 @@ function WheelPhase() {
       exit={{ opacity: 0 }}
       className="flex min-h-[70vh] flex-col items-center justify-center"
     >
-      <MoodWheel players={players} level={level} turn={turn} onLand={landOn} />
+      <MoodWheel
+        players={players}
+        level={level}
+        turn={turn}
+        memory={wheelMemory}
+        onLand={(index, memory) => {
+          landOn(index, memory)
+          const player = players[index]
+          if (ttsEnabled && player && ttsSupported()) {
+            void ttsAnnounceTurn(player.name).then(() => {
+              if (ttsEnabled) void ttsAskChoice()
+            })
+          }
+        }}
+      />
     </motion.div>
   )
 }
@@ -369,6 +393,8 @@ function Choice() {
   const players = useTodStore((state) => state.players)
   const currentIndex = useTodStore((state) => state.currentIndex)
   const choose = useTodStore((state) => state.choose)
+  const ttsEnabled = useTodStore((state) => state.ttsEnabled)
+  const setTtsEnabled = useTodStore((state) => state.setTtsEnabled)
   const player = players[currentIndex]
   if (!player) return null
 
@@ -399,6 +425,19 @@ function Choice() {
           Action
         </motion.button>
       </div>
+      {ttsSupported() ? (
+        <button
+          type="button"
+          className="mt-8 inline-flex items-center gap-2 text-sm text-ink/45 dark:text-white/45"
+          onClick={() => {
+            if (ttsEnabled) ttsStop()
+            setTtsEnabled(!ttsEnabled)
+          }}
+        >
+          {ttsEnabled ? <Volume2 size={16} /> : <VolumeX size={16} />}
+          Voix {ttsEnabled ? 'on' : 'off'}
+        </button>
+      ) : null}
     </motion.div>
   )
 }
@@ -412,7 +451,23 @@ function PlayCard() {
   const level = useTodStore((state) => state.level)
   const complete = useTodStore((state) => state.complete)
   const refuse = useTodStore((state) => state.refuse)
+  const ttsEnabled = useTodStore((state) => state.ttsEnabled)
+  const setTtsEnabled = useTodStore((state) => state.setTtsEnabled)
+  const players = useTodStore((state) => state.players)
+  const currentIndex = useTodStore((state) => state.currentIndex)
   const meta = TOD_LEVELS.find((item) => item.id === level)
+  const player = players[currentIndex]
+  const duration = card?.duration ?? 0
+  const [timerOn, setTimerOn] = useState(duration > 0)
+
+  useEffect(() => {
+    setTimerOn(duration > 0)
+    if (ttsEnabled && cardText && ttsSupported()) {
+      void ttsReadChallenge(cardText, duration || undefined)
+    }
+    return () => ttsStop()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [card?.id])
 
   return (
     <motion.div
@@ -425,15 +480,72 @@ function PlayCard() {
         {turn} · {meta?.title} · {choice === 'dare' ? 'Action' : 'Vérité'}
         {partnerName ? ` · ${partnerName}` : ''}
       </p>
-      <div className="flex flex-1 items-center justify-center px-2">
+
+      {player ? (
+        <p className="mt-3 text-center font-heading text-lg font-bold">✨ {player.name} ✨</p>
+      ) : null}
+
+      {duration > 0 && timerOn ? (
+        <div className="mt-5 px-2">
+          <ChallengeTimer
+            key={card?.id}
+            seconds={duration}
+            tts={ttsEnabled}
+            onEnd={() => setTimerOn(false)}
+          />
+        </div>
+      ) : null}
+
+      <div className="flex flex-1 items-center justify-center px-2 py-6">
         <p className="text-center font-heading text-3xl font-bold leading-snug">{cardText}</p>
       </div>
+
+      {duration > 0 ? (
+        <p className="mb-3 text-center text-xs text-ink/45 dark:text-white/45">
+          {timerOn ? `${duration}s pour le défi` : 'Temps écoulé — valide ou refuse'}
+        </p>
+      ) : null}
+
       {card ? (
         <div className="space-y-3">
-          <Button onClick={complete}>
+          {ttsSupported() ? (
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  if (!ttsEnabled) setTtsEnabled(true)
+                  void ttsReadChallenge(cardText, duration || undefined)
+                }}
+              >
+                <Volume2 size={16} /> Écouter
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  ttsStop()
+                  setTtsEnabled(false)
+                }}
+              >
+                <VolumeX size={16} /> Couper
+              </Button>
+            </div>
+          ) : null}
+          <Button
+            onClick={() => {
+              ttsStop()
+              complete()
+            }}
+          >
             <Check size={18} /> C’est fait
           </Button>
-          <button type="button" onClick={refuse} className="w-full py-3 text-sm text-ink/40 dark:text-white/40">
+          <button
+            type="button"
+            onClick={() => {
+              ttsStop()
+              refuse()
+            }}
+            className="w-full py-3 text-sm text-ink/40 dark:text-white/40"
+          >
             Je refuse
           </button>
         </div>

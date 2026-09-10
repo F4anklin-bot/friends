@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware'
 import { fillTemplate, REFUSE_GAGES_FEMALE, REFUSE_GAGES_MALE, TOD_CARDS } from '../data/todCards'
 import type { GenderFilter, Player, TodCard, TodLevel, TodParty, TodPhase, TodType } from '../types/game'
 import { pick, shuffle, uid } from '../utils/helpers'
+import { emptyWheelMemory, type WheelMemory } from '../utils/wheelPick'
 
 interface TodState {
   phase: TodPhase
@@ -11,9 +12,11 @@ interface TodState {
   party: TodParty
   customCards: TodCard[]
   adultOk: boolean
+  ttsEnabled: boolean
   currentIndex: number
   turn: number
   spinning: boolean
+  wheelMemory: WheelMemory
   choice: TodType | null
   card: TodCard | null
   cardText: string
@@ -23,12 +26,13 @@ interface TodState {
   setLevel: (level: TodLevel) => void
   setParty: (party: TodParty) => void
   setAdultOk: (ok: boolean) => void
+  setTtsEnabled: (ok: boolean) => void
   addCustomCard: (type: TodType, content: string) => void
   removeCustomCard: (id: string) => void
   goTo: (phase: TodPhase) => void
   startGame: (lobby: Player[]) => string | null
   spin: () => void
-  landOn: (index: number) => void
+  landOn: (index: number, memory: WheelMemory) => void
   choose: (choice: TodType) => void
   complete: () => void
   refuse: () => void
@@ -40,17 +44,22 @@ function playerInteract(player: Player): GenderFilter {
   return player.interact ?? 'all'
 }
 
-function eligibleOthers(player: Player, lobby: Player[]) {
+function intimateFilter(level: TodLevel) {
+  return level === 'hot' || level === 'hard' || level === 'extreme' || level === 'spice'
+}
+
+function eligibleOthers(player: Player, lobby: Player[], card?: TodCard, level?: TodLevel) {
   const interact = playerInteract(player)
   return lobby.filter((other) => {
     if (other.id === player.id) return false
-    if (interact === 'all') return true
-    return other.gender === interact
+    if (interact !== 'all' && other.gender !== interact) return false
+    const intimate = card?.intimate || (card && level && intimateFilter(level) && card.type === 'dare' && card.playerCount === 'couple')
+    if (intimate && player.gender === 'male' && other.gender === 'male') return false
+    return true
   })
 }
 
-function cardFits(card: TodCard, player: Player, others: Player[]) {
-  const interact = playerInteract(player)
+function cardFits(card: TodCard, player: Player, others: Player[], interact: GenderFilter) {
   if (card.forGender !== 'any' && card.forGender !== player.gender) return false
   if (card.withGender === 'male' && interact === 'female') return false
   if (card.withGender === 'female' && interact === 'male') return false
@@ -75,16 +84,20 @@ function drawCard(
   const pool = deck.filter((card) => {
     if (card.type !== type) return false
     if (level !== 'custom' && (card.level !== level || card.party !== party)) return false
-    return cardFits(card, player, eligibleOthers(player, lobby))
+    const others = eligibleOthers(player, lobby, card, level)
+    return cardFits(card, player, others, playerInteract(player))
   })
   const fresh = pool.filter((card) => !usedIds.includes(card.id))
   const source = fresh.length ? fresh : pool
   if (source.length === 0) return null
   const card = pick(source)
-  const others = eligibleOthers(player, lobby)
+  const others = eligibleOthers(player, lobby, card, level)
   const partners =
     card.withGender === 'any' ? others : others.filter((other) => other.gender === card.withGender)
-  const other = card.playerCount === 'couple' || card.content.includes('{other}') ? pick(partners) : undefined
+  const other =
+    card.playerCount === 'couple' || card.content.includes('{other}') || card.content.includes('{target}')
+      ? pick(partners)
+      : undefined
   return { card, other }
 }
 
@@ -106,9 +119,11 @@ export const useTodStore = create<TodState>()(
       party: 'friends',
       customCards: [],
       adultOk: false,
+      ttsEnabled: true,
       currentIndex: 0,
       turn: 0,
       spinning: false,
+      wheelMemory: emptyWheelMemory(),
       choice: null,
       card: null,
       cardText: '',
@@ -118,6 +133,7 @@ export const useTodStore = create<TodState>()(
       setLevel: (level) => set({ level }),
       setParty: (party) => set({ party }),
       setAdultOk: (adultOk) => set({ adultOk }),
+      setTtsEnabled: (ttsEnabled) => set({ ttsEnabled }),
       addCustomCard: (type, content) => {
         const text = content.trim()
         if (!text) return
@@ -133,7 +149,7 @@ export const useTodStore = create<TodState>()(
               intensity: 5,
               forGender: 'any',
               withGender: 'any',
-              playerCount: text.includes('{other}') ? 'couple' : 'solo',
+              playerCount: text.includes('{other}') || text.includes('{target}') ? 'couple' : 'solo',
             },
           ],
         })
@@ -154,6 +170,7 @@ export const useTodStore = create<TodState>()(
           currentIndex: 0,
           turn: 1,
           spinning: false,
+          wheelMemory: emptyWheelMemory(),
           choice: null,
           card: null,
           cardText: '',
@@ -164,10 +181,11 @@ export const useTodStore = create<TodState>()(
         return null
       },
       spin: () => set({ spinning: true }),
-      landOn: (index) =>
+      landOn: (index, wheelMemory) =>
         set({
           spinning: false,
           currentIndex: index,
+          wheelMemory,
           phase: 'choice',
           choice: null,
           card: null,
@@ -193,7 +211,12 @@ export const useTodStore = create<TodState>()(
         set({
           choice,
           card: drawn.card,
-          cardText: fillTemplate(drawn.card.content, player.name, drawn.other?.name),
+          cardText: fillTemplate(
+            drawn.card.content,
+            player.name,
+            drawn.other?.name,
+            drawn.card.duration,
+          ),
           partnerName: drawn.other?.name ?? null,
           phase: 'card',
           history: [drawn.card.id, ...used].slice(0, 80),
@@ -224,6 +247,7 @@ export const useTodStore = create<TodState>()(
           currentIndex: 0,
           turn: 0,
           spinning: false,
+          wheelMemory: emptyWheelMemory(),
           choice: null,
           card: null,
           cardText: '',
@@ -233,18 +257,20 @@ export const useTodStore = create<TodState>()(
     }),
     {
       name: 'friends-tod',
-      version: 5,
+      version: 6,
       migrate: () => ({
         level: 'soft' as const,
         party: 'friends' as const,
         customCards: [],
         adultOk: false,
+        ttsEnabled: true,
       }),
       partialize: (state) => ({
         level: state.level,
         party: state.party,
         customCards: state.customCards,
         adultOk: state.adultOk,
+        ttsEnabled: state.ttsEnabled,
       }),
     },
   ),
